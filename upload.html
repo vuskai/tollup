@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tải file lên</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+  .block{padding:18px; margin-bottom:16px}
+  label.f{display:block; font-weight:600; font-size:.9rem; margin-bottom:6px}
+  .row{display:flex; gap:10px; align-items:center; flex-wrap:wrap}
+  .row input[type=password]{flex:1; min-width:200px}
+  .check{display:flex; gap:8px; align-items:center; font-size:.9rem; margin-top:10px; color:var(--muted)}
+  .drop{border:2px dashed var(--line); border-radius:var(--radius); padding:40px 20px; text-align:center;
+        cursor:pointer; background:var(--surface); transition:border-color .15s, background .15s}
+  .drop.over{border-color:var(--accent); background:var(--accent-soft)}
+  .drop strong{display:block; font-size:1.05rem; margin-bottom:4px}
+  .queue{list-style:none; margin:16px 0 0; padding:0}
+  .q{padding:12px 16px; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:center}
+  .q:last-child{border-bottom:0}
+  .q .n{flex:1; min-width:0; overflow-wrap:anywhere; font-weight:600}
+  .q .s{font-size:.85rem; color:var(--muted); white-space:nowrap}
+  .q .s.ok{color:var(--ok)} .q .s.bad{color:var(--err)}
+  .actions{display:flex; gap:10px; margin-top:14px; align-items:center}
+  details summary{cursor:pointer; font-weight:600}
+  details ol{margin:10px 0 0; padding-left:20px; font-size:.9rem}
+  code{background:var(--accent-soft); padding:1px 6px; border-radius:4px; font-size:.88em}
+  [hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>Tải file lên</h1>
+      <p class="sub">File sẽ được lưu vào kho GitHub và xuất hiện ở trang tải về.</p>
+    </div>
+    <a class="switch" href="index.html">Trang tải về</a>
+  </header>
+
+  <section class="card block">
+    <label class="f" for="token">Mã truy cập GitHub (token)</label>
+    <div class="row">
+      <input id="token" type="password" autocomplete="off" placeholder="github_pat_…">
+      <button id="saveTok" class="btn ghost" type="button">Lưu trên máy này</button>
+      <button id="clearTok" class="btn ghost" type="button" hidden>Xóa</button>
+    </div>
+    <p class="muted" style="margin:10px 0 0;font-size:.85rem">Chỉ chủ kho mới có token nên chỉ bạn tải lên được. Token chỉ lưu trong trình duyệt của bạn.</p>
+    <details style="margin-top:12px">
+      <summary>Cách tạo token</summary>
+      <ol>
+        <li>Vào GitHub → Settings → Developer settings → Fine-grained tokens → Generate new token.</li>
+        <li>Repository access: chọn đúng kho của bạn.</li>
+        <li>Permissions → Contents: <code>Read and write</code>.</li>
+        <li>Tạo token, sao chép và dán vào ô trên.</li>
+      </ol>
+    </details>
+  </section>
+
+  <div id="drop" class="drop" tabindex="0" role="button" aria-label="Chọn file để tải lên">
+    <strong>Kéo file vào đây</strong>
+    <span class="muted">hoặc bấm để chọn (tối đa 50 MB mỗi file)</span>
+    <input id="pick" type="file" multiple hidden>
+  </div>
+
+  <div class="check"><input id="over" type="checkbox"><label for="over">Ghi đè nếu trùng tên file</label></div>
+
+  <div id="qwrap" class="card" style="margin-top:16px" hidden>
+    <ul id="queue" class="queue" style="margin:0"></ul>
+  </div>
+  <div class="actions" id="act" hidden>
+    <button id="go" class="btn" type="button">Tải lên</button>
+    <button id="clear" class="btn ghost" type="button">Xóa danh sách</button>
+    <span id="msg" class="muted" style="font-size:.9rem"></span>
+  </div>
+
+  <footer>Sau khi tải lên, file hiện ngay ở trang tải về (không cần chờ GitHub Pages dựng lại).</footer>
+</div>
+
+<script src="config.js"></script>
+<script>
+(function(){
+  const C = window.APP_CONFIG, MAX = 50 * 1024 * 1024, KEY = 'gh_upload_token';
+  const $ = id => document.getElementById(id);
+  const tok = $('token'), drop = $('drop'), pick = $('pick'), queue = $('queue');
+  let items = [];
+
+  // ---- token ----
+  try{ const t = localStorage.getItem(KEY); if (t){ tok.value = t; $('clearTok').hidden = false; } }catch(_){}
+  $('saveTok').onclick = () => { try{ localStorage.setItem(KEY, tok.value.trim()); $('clearTok').hidden = false; $('msg').textContent = 'Đã lưu token.'; }catch(_){ $('msg').textContent = 'Không lưu được token.'; } };
+  $('clearTok').onclick = () => { try{ localStorage.removeItem(KEY); }catch(_){} tok.value = ''; $('clearTok').hidden = true; };
+
+  // ---- chọn file ----
+  drop.onclick = () => pick.click();
+  drop.onkeydown = e => { if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); pick.click(); } };
+  pick.onchange = () => { add(pick.files); pick.value = ''; };
+  ['dragenter','dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
+  drop.addEventListener('drop', e => add(e.dataTransfer.files));
+
+  const fmt = n => n < 1048576 ? (n/1024).toFixed(0) + ' KB' : (n/1048576).toFixed(1) + ' MB';
+  const clean = n => n.replace(/[\\/:*?"<>|#%]/g, '_').trim();
+
+  function add(list){
+    for (const f of list){
+      const it = {file:f, name:clean(f.name), status:'wait', text:'Chờ tải lên'};
+      if (f.size > MAX){ it.status = 'bad'; it.text = 'Quá 50 MB'; }
+      items.push(it);
+    }
+    draw();
+  }
+  function draw(){
+    $('qwrap').hidden = $('act').hidden = !items.length;
+    queue.innerHTML = items.map(it => `<li class="q"><span class="n"></span><span class="s ${it.status==='ok'?'ok':it.status==='bad'?'bad':''}">${fmt(it.file.size)} · ${it.text}</span></li>`).join('');
+    [...queue.children].forEach((li,i) => li.querySelector('.n').textContent = items[i].name);
+  }
+  $('clear').onclick = () => { items = []; draw(); $('msg').textContent = ''; };
+
+  // ---- GitHub API ----
+  const api = p => `https://api.github.com/repos/${C.owner}/${C.repo}/contents/${p}`;
+  const hdr = t => ({Authorization:'Bearer ' + t, Accept:'application/vnd.github+json', 'Content-Type':'application/json'});
+  const b64 = f => new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result.split(',')[1]);
+    r.onerror = () => rej(new Error('Không đọc được file'));
+    r.readAsDataURL(f);
+  });
+
+  async function upload(it, t){
+    const path = encodeURIComponent(C.folder) + '/' + encodeURIComponent(it.name);
+    let sha;
+    const ex = await fetch(api(path) + '?ref=' + encodeURIComponent(C.branch), {headers:hdr(t), cache:'no-store'});
+    if (ex.ok){
+      if (!$('over').checked) throw new Error('Đã có file trùng tên');
+      sha = (await ex.json()).sha;
+    } else if (ex.status === 401) throw new Error('Token không hợp lệ');
+    else if (ex.status !== 404) throw new Error('Lỗi kiểm tra (mã ' + ex.status + ')');
+
+    const body = {message:'Tải lên ' + it.name, content: await b64(it.file), branch: C.branch};
+    if (sha) body.sha = sha;
+    const r = await fetch(api(path), {method:'PUT', headers:hdr(t), body:JSON.stringify(body)});
+    if (!r.ok){
+      let m = ''; try{ m = (await r.json()).message; }catch(_){}
+      if (r.status === 403 || r.status === 404) throw new Error('Token thiếu quyền Contents: Read and write');
+      throw new Error(m || 'Lỗi mã ' + r.status);
+    }
+  }
+
+  $('go').onclick = async () => {
+    const t = tok.value.trim();
+    if (!t){ $('msg').textContent = 'Hãy nhập token trước.'; tok.focus(); return; }
+    if (C.owner.startsWith('TEN_')){ $('msg').textContent = 'Chưa sửa owner/repo trong config.js.'; return; }
+    $('go').disabled = true; $('msg').textContent = '';
+    for (const it of items){
+      if (it.status === 'ok' || it.status === 'bad' && it.file.size > MAX) continue;
+      it.status = 'wait'; it.text = 'Đang tải lên…'; draw();
+      try{ await upload(it, t); it.status = 'ok'; it.text = 'Xong'; }
+      catch(e){ it.status = 'bad'; it.text = e.message; }
+      draw();
+    }
+    const ok = items.filter(i => i.status === 'ok').length;
+    $('msg').textContent = ok + '/' + items.length + ' file đã tải lên.';
+    $('go').disabled = false;
+  };
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tải file về</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+  .tools{display:flex; gap:12px; align-items:center; margin-bottom:14px}
+  .count{white-space:nowrap; font-size:.9rem}
+  .list{list-style:none; margin:0; padding:0}
+  .item{display:flex; align-items:center; gap:14px; padding:14px 16px; border-bottom:1px solid var(--line)}
+  .item:last-child{border-bottom:0}
+  .ext{flex:0 0 auto; min-width:46px; text-align:center; font-weight:700; font-size:.75rem;
+       background:var(--accent-soft); color:var(--accent); border-radius:6px; padding:8px 6px}
+  .meta{flex:1; min-width:0}
+  .name{font-weight:600; overflow-wrap:anywhere}
+  .size{font-size:.85rem; color:var(--muted)}
+  .state{padding:36px 20px; text-align:center}
+  .state strong{display:block; margin-bottom:4px}
+  .err{color:var(--err)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>Tải file về</h1>
+      <p class="sub">Chọn file bên dưới và bấm “Tải về”.</p>
+    </div>
+    <a class="switch" href="upload.html">Trang tải lên</a>
+  </header>
+
+  <div class="tools">
+    <input id="q" type="search" placeholder="Tìm theo tên file" aria-label="Tìm theo tên file">
+    <span id="count" class="count muted"></span>
+    <button id="reload" class="btn ghost" type="button">Làm mới</button>
+  </div>
+
+  <div class="card"><div id="out" class="state muted">Đang tải danh sách…</div></div>
+
+  <footer>File được lưu trong kho GitHub của chủ trang.</footer>
+</div>
+
+<script src="config.js"></script>
+<script>
+(function(){
+  const C = window.APP_CONFIG;
+  const out = document.getElementById('out');
+  const q = document.getElementById('q');
+  const count = document.getElementById('count');
+  let files = [];
+
+  const fmt = n => {
+    if (n < 1024) return n + ' B';
+    const u = ['KB','MB','GB']; let i = -1;
+    do { n /= 1024; i++; } while (n >= 1024 && i < 2);
+    return n.toFixed(n < 10 ? 1 : 0) + ' ' + u[i];
+  };
+  const ext = n => { const m = n.match(/\.([a-z0-9]{1,5})$/i); return m ? m[1].toUpperCase() : 'FILE'; };
+  const esc = s => s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+  async function load(){
+    out.className = 'state muted'; out.textContent = 'Đang tải danh sách…';
+    try{
+      const url = `https://api.github.com/repos/${C.owner}/${C.repo}/contents/${encodeURIComponent(C.folder)}?ref=${encodeURIComponent(C.branch)}&_=${Date.now()}`;
+      const r = await fetch(url, {headers:{Accept:'application/vnd.github+json'}});
+      if (r.status === 404) { files = []; render(); return; }
+      if (r.status === 403) throw new Error('GitHub tạm giới hạn lượt truy cập. Hãy thử lại sau ít phút.');
+      if (!r.ok) throw new Error('Không đọc được danh sách (mã ' + r.status + ').');
+      const data = await r.json();
+      files = data.filter(f => f.type === 'file' && f.name !== '.gitkeep')
+                  .sort((a,b) => a.name.localeCompare(b.name, 'vi'));
+      render();
+    }catch(e){
+      out.className = 'state err';
+      out.innerHTML = '<strong>Không tải được danh sách</strong>' + esc(e.message);
+      count.textContent = '';
+    }
+  }
+
+  function render(){
+    const kw = q.value.trim().toLowerCase();
+    const shown = files.filter(f => f.name.toLowerCase().includes(kw));
+    count.textContent = files.length ? shown.length + '/' + files.length + ' file' : '';
+    if (!shown.length){
+      out.className = 'state muted';
+      out.innerHTML = files.length
+        ? '<strong>Không có file khớp</strong>Thử từ khóa khác.'
+        : '<strong>Chưa có file nào</strong>Hãy tải file lên ở trang tải lên.';
+      return;
+    }
+    out.className = ''; out.style.padding = '0';
+    out.innerHTML = '<ul class="list">' + shown.map((f,i) => `
+      <li class="item">
+        <span class="ext">${esc(ext(f.name))}</span>
+        <div class="meta"><div class="name">${esc(f.name)}</div><div class="size">${fmt(f.size)}</div></div>
+        <button class="btn" type="button" data-i="${files.indexOf(f)}">Tải về</button>
+      </li>`).join('') + '</ul>';
+  }
+
+  out.addEventListener('click', async e => {
+    const b = e.target.closest('button[data-i]'); if (!b) return;
+    const f = files[+b.dataset.i]; const old = b.textContent;
+    b.disabled = true; b.textContent = 'Đang tải…';
+    try{
+      const r = await fetch(f.download_url, {cache:'no-store'});
+      if (!r.ok) throw 0;
+      const url = URL.createObjectURL(await r.blob());
+      const a = document.createElement('a'); a.href = url; a.download = f.name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    }catch(_){
+      window.open(f.download_url, '_blank', 'noopener'); // dự phòng
+    }
+    b.disabled = false; b.textContent = old;
+  });
+
+  q.addEventListener('input', render);
+  document.getElementById('reload').addEventListener('click', load);
+  load();
+})();
+</script>
+</body>
+</html>
